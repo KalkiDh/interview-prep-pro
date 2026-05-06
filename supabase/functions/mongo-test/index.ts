@@ -1,4 +1,4 @@
-import { MongoClient } from "npm:mongodb@6.10.0";
+import { MongoClient } from "https://deno.land/x/mongo@v0.34.0/mod.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -6,24 +6,16 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
-let cachedClient: MongoClient | null = null;
-
-async function getClient(): Promise<MongoClient> {
-  if (cachedClient) return cachedClient;
-  const uri = Deno.env.get("MONGODB_URI");
-  if (!uri) throw new Error("MONGODB_URI is not configured");
-  const client = new MongoClient(uri);
-  await client.connect();
-  cachedClient = client;
-  return client;
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const client = await getClient();
-    const db = client.db("interviewiq");
+    const uri = Deno.env.get("MONGODB_URI");
+    if (!uri) throw new Error("MONGODB_URI is not configured");
+
+    const client = new MongoClient();
+    await client.connect(uri);
+    const db = client.database("interviewiq");
     const collection = db.collection("test_data");
 
     if (req.method === "POST") {
@@ -32,15 +24,16 @@ Deno.serve(async (req) => {
         message: typeof body.message === "string" ? body.message : "hello from InterviewIQ",
         createdAt: new Date(),
       };
-      const result = await collection.insertOne(doc);
+      const insertedId = await collection.insertOne(doc);
+      client.close();
       return new Response(
-        JSON.stringify({ success: true, insertedId: result.insertedId, doc }),
+        JSON.stringify({ success: true, insertedId, doc }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
-    // GET: return last 10 docs
     const docs = await collection.find({}).sort({ createdAt: -1 }).limit(10).toArray();
+    client.close();
     return new Response(
       JSON.stringify({ success: true, count: docs.length, docs }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
